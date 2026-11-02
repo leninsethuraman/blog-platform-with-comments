@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blog Platform</title>
+<style>
+  :root { --bg:#fbfaf7; --ink:#1d2430; --muted:#667085; --line:#e4e1d8; --accent:#2457d6; --danger:#c0392b; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171c; --ink:#e8eaee; --muted:#9aa3b2; --line:#2a2f38; --accent:#7ea2ff; --danger:#ff7b6b; --card:#1b1f26; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.65 Georgia, "Times New Roman", serif; }
+  header { border-bottom:1px solid var(--line); }
+  nav { max-width:720px; margin:0 auto; padding:14px 20px; display:flex; align-items:center; gap:16px; font-family:system-ui,sans-serif; font-size:15px; }
+  nav .brand { font:700 20px Georgia,serif; color:var(--ink); text-decoration:none; margin-right:auto; }
+  nav a { color:var(--muted); text-decoration:none; } nav a:hover { color:var(--ink); }
+  main { max-width:720px; margin:0 auto; padding:32px 20px 80px; }
+  a { color:var(--accent); }
+  h1 { font-size:32px; line-height:1.2; margin:0 0 8px; }
+  .meta { font:14px system-ui,sans-serif; color:var(--muted); }
+  .post-item { padding:22px 0; border-bottom:1px solid var(--line); }
+  .post-item h2 { margin:0 0 4px; font-size:24px; } .post-item h2 a { color:var(--ink); text-decoration:none; }
+  .post-item h2 a:hover { color:var(--accent); }
+  .excerpt { margin:8px 0 0; color:var(--muted); }
+  .body { white-space:pre-wrap; margin:24px 0 32px; }
+  input, textarea { width:100%; font:16px system-ui,sans-serif; padding:10px 12px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); margin:4px 0 14px; }
+  textarea { min-height:120px; resize:vertical; } textarea.big { min-height:320px; }
+  input:focus, textarea:focus, button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  label { font:600 14px system-ui,sans-serif; }
+  button, .btn { font:600 15px system-ui,sans-serif; padding:9px 16px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; text-decoration:none; display:inline-block; }
+  button.ghost { background:transparent; color:var(--ink); border-color:var(--line); }
+  button.danger { background:transparent; color:var(--danger); border-color:var(--line); }
+  .actions { display:flex; gap:8px; margin-bottom:8px; }
+  .comment { padding:14px 0; border-top:1px solid var(--line); } .comment p { margin:4px 0; white-space:pre-wrap; }
+  .link-btn { background:none; border:0; padding:0; color:var(--danger); font:14px system-ui,sans-serif; cursor:pointer; }
+  .error { background:#fdecea; color:#8a1f11; border-radius:6px; padding:10px 12px; font:14px system-ui,sans-serif; margin-bottom:14px; }
+  .empty { color:var(--muted); padding:32px 0; }
+  h3 { margin-top:40px; }
+</style>
+</head>
+<body>
+<header><nav id="nav"></nav></header>
+<main id="app"></main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (d) => new Date(d.replace(' ','T') + 'Z').toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
+let session = JSON.parse(localStorage.getItem('session') || 'null');
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: 'Bearer ' + session.token } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+  return data;
+}
+const setSession = (s) => { session = s; s ? localStorage.setItem('session', JSON.stringify(s)) : localStorage.removeItem('session'); };
+const errBox = (m) => `<div class="error" role="alert">${esc(m)}</div>`;
+
+function renderNav() {
+  $('#nav').innerHTML = `<a class="brand" href="#/">Blog</a>` + (session
+    ? `<a href="#/new">Write a post</a><span class="meta">${esc(session.user.username)}</span><a href="#" id="logout">Log out</a>`
+    : `<a href="#/login">Log in</a><a href="#/register">Sign up</a>`);
+  const lo = $('#logout');
+  if (lo) lo.onclick = (e) => { e.preventDefault(); setSession(null); location.hash = '#/'; route(); };
+}
+
+async function listView() {
+  const posts = await api('/posts');
+  $('#app').innerHTML = `<h1>Latest posts</h1>` + (posts.length ? posts.map((p) => `
+    <article class="post-item">
+      <h2><a href="#/post/${p.id}">${esc(p.title)}</a></h2>
+      <div class="meta">${esc(p.author)} · ${fmt(p.created_at)} · ${p.comment_count} comment${p.comment_count === 1 ? '' : 's'}</div>
+      <p class="excerpt">${esc(p.content.slice(0, 180))}${p.content.length > 180 ? '…' : ''}</p>
+    </article>`).join('') : `<p class="empty">No posts yet. ${session ? '<a href="#/new">Write the first one.</a>' : '<a href="#/register">Sign up</a> to write the first one.'}</p>`);
+}
+
+async function postView(id) {
+  const p = await api('/posts/' + id);
+  const mine = session && session.user.id === p.user_id;
+  $('#app').innerHTML = `
+    <h1>${esc(p.title)}</h1>
+    <div class="meta">${esc(p.author)} · ${fmt(p.created_at)}${p.updated_at !== p.created_at ? ' · edited' : ''}</div>
+    ${mine ? `<div class="actions" style="margin-top:12px"><a class="btn ghost" style="color:var(--ink);border-color:var(--line);background:transparent" href="#/edit/${p.id}">Edit</a><button class="danger" id="del">Delete</button></div>` : ''}
+    <div class="body">${esc(p.content)}</div>
+    <h3>${p.comments.length} comment${p.comments.length === 1 ? '' : 's'}</h3>
+    <div id="comments">${p.comments.map((c) => `
+      <div class="comment">
+        <div class="meta">${esc(c.author)} · ${fmt(c.created_at)}
+          ${session && (session.user.id === c.user_id || mine) ? `<button class="link-btn" data-del="${c.id}">Delete</button>` : ''}</div>
+        <p>${esc(c.content)}</p>
+      </div>`).join('')}</div>
+    ${session ? `<div id="cerr"></div><label for="ctext">Add a comment</label><textarea id="ctext"></textarea><button id="cpost">Post comment</button>`
+      : `<p class="meta"><a href="#/login">Log in</a> to join the conversation.</p>`}`;
+  if ($('#del')) $('#del').onclick = async () => {
+    if (!confirm('Delete this post and its comments?')) return;
+    await api('/posts/' + id, { method: 'DELETE' }); location.hash = '#/';
+  };
+  document.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    await api('/comments/' + b.dataset.del, { method: 'DELETE' }); postView(id);
+  });
+  if ($('#cpost')) $('#cpost').onclick = async () => {
+    try { await api(`/posts/${id}/comments`, { method: 'POST', body: { content: $('#ctext').value } }); postView(id); }
+    catch (e) { $('#cerr').innerHTML = errBox(e.message); }
+  };
+}
+
+async function editorView(id) {
+  if (!session) { location.hash = '#/login'; return; }
+  const p = id ? await api('/posts/' + id) : { title: '', content: '' };
+  if (id && p.user_id !== session.user.id) { location.hash = '#/'; return; }
+  $('#app').innerHTML = `
+    <h1>${id ? 'Edit post' : 'New post'}</h1><div id="err"></div>
+    <label for="t">Title</label><input id="t" value="${esc(p.title)}">
+    <label for="c">Content</label><textarea id="c" class="big">${esc(p.content)}</textarea>
+    <div class="actions"><button id="save">${id ? 'Save changes' : 'Publish'}</button><a class="btn ghost" style="color:var(--ink);border-color:var(--line);background:transparent" href="#/${id ? 'post/' + id : ''}">Cancel</a></div>`;
+  $('#save').onclick = async () => {
+    try {
+      const body = { title: $('#t').value, content: $('#c').value };
+      const saved = id ? await api('/posts/' + id, { method: 'PUT', body }) : await api('/posts', { method: 'POST', body });
+      location.hash = '#/post/' + saved.id;
+    } catch (e) { $('#err').innerHTML = errBox(e.message); }
+  };
+}
+
+function authView(mode) {
+  const reg = mode === 'register';
+  $('#app').innerHTML = `
+    <h1>${reg ? 'Create your account' : 'Log in'}</h1><div id="err"></div>
+    ${reg ? '<label for="u">Username</label><input id="u" autocomplete="username">' : ''}
+    <label for="e">Email</label><input id="e" type="email" autocomplete="email">
+    <label for="p">Password</label><input id="p" type="password" autocomplete="${reg ? 'new-password' : 'current-password'}">
+    <button id="go">${reg ? 'Sign up' : 'Log in'}</button>
+    <p class="meta">${reg ? 'Already have an account? <a href="#/login">Log in</a>' : 'New here? <a href="#/register">Create an account</a>'}</p>`;
+  const submit = async () => {
+    try {
+      const body = { email: $('#e').value, password: $('#p').value, ...(reg ? { username: $('#u').value } : {}) };
+      setSession(await api('/auth/' + mode, { method: 'POST', body })); location.hash = '#/';
+    } catch (e) { $('#err').innerHTML = errBox(e.message); }
+  };
+  $('#go').onclick = submit;
+  $('#p').onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+}
+
+async function route() {
+  renderNav();
+  const [, page, id] = (location.hash || '#/').split('/');
+  try {
+    if (page === 'post' && id) await postView(id);
+    else if (page === 'new') await editorView();
+    else if (page === 'edit' && id) await editorView(id);
+    else if (page === 'login') authView('login');
+    else if (page === 'register') authView('register');
+    else await listView();
+  } catch (e) { $('#app').innerHTML = errBox(e.message) + '<a href="#/">Back to posts</a>'; }
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
